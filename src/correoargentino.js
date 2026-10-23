@@ -46,6 +46,44 @@ function getCredentials() {
 async function fetchWithTimeout(url, options, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  const startedAt = Date.now();
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+
+    console.log(
+      `[correoargentino] respuesta ${url.split("/").pop()} HTTP=${response.status} tiempo=${Date.now() - startedAt}ms`
+    );
+
+    return response;
+  } catch (err) {
+    console.error(
+      `[correoargentino] error ${url.split("/").pop()} tipo=${err.name} mensaje=${err.message} tiempo=${Date.now() - startedAt}ms`
+    );
+
+    if (err.name === "AbortError") {
+      throw new ShippingError(
+        504,
+        "TIMEOUT",
+        "Correo Argentino no respondió a tiempo"
+      );
+    }
+
+    throw new ShippingError(
+      502,
+      "NETWORK_ERROR",
+      "No se pudo conectar con Correo Argentino"
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (err) {
