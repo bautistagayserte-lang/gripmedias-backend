@@ -265,3 +265,4 @@ async function getShippingRates({ postalCodeDestination, deliveredType, dimensio
 }
 
 module.exports = { ShippingError, getShippingRates };
+// Diagnóstico de conexión con Correo Argentino
