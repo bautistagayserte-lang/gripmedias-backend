@@ -82,20 +82,7 @@ async function fetchWithTimeout(url, options, timeoutMs) {
     clearTimeout(timer);
   }
 }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } catch (err) {
-    if (err.name === "AbortError") {
-      throw new ShippingError(504, "TIMEOUT", "Correo Argentino no respondió a tiempo");
-    }
-    throw new ShippingError(502, "NETWORK_ERROR", "No se pudo conectar con Correo Argentino");
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
+ 
 /* Devuelve un JWT válido, reutilizando el que ya está en memoria si todavía
    no venció. Si no hay token o está por vencer, pide uno nuevo con Basic Auth. */
 async function getValidToken() {
