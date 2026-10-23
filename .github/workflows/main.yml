@@ -1,0 +1,15 @@
+name: Test Correo Argentino
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-correo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Probar conexión con Correo Argentino
+        run: |
+          curl -m 20 -s -o /dev/null -w "HTTP=%{http_code} TOTAL=%{time_total}\n" \
+            -X POST \
+            https://api.correoargentino.com.ar/micorreo/v1/token
