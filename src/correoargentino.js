@@ -43,54 +43,55 @@ function getCredentials() {
   return { username, password };
 }
 
+/* Un único reintento SOLO ante fallas de red al establecer la conexión
+   (DNS, TLS, reset: típicas de la primera conexión en frío). Un timeout o una
+   respuesta HTTP de error NO se reintentan: si Correo Argentino falla de
+   verdad, el error le llega al frontend. Las llamadas (/token y /rates) no
+   modifican nada del lado de Correo Argentino, así que reintentarlas es seguro. */
 async function fetchWithTimeout(url, options, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  const startedAt = Date.now();
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-
-    console.log(
-      `[correoargentino] respuesta ${url.split("/").pop()} HTTP=${response.status} tiempo=${Date.now() - startedAt}ms`
-    );
-
-    return response;
-  } catch (err) {
-    console.error(
-      `[correoargentino] error ${url.split("/").pop()} tipo=${err.name} mensaje=${err.message} tiempo=${Date.now() - startedAt}ms`
-    );
-
-    if (err.name === "AbortError") {
-      throw new ShippingError(
-        504,
-        "TIMEOUT",
-        "Correo Argentino no respondió a tiempo"
-      );
+  const path = url.replace(/^https?:\/\/[^/]+/, "");
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } catch (err) {
+      if (err.name === "AbortError") {
+        console.error(`[correoargentino] timeout (${timeoutMs}ms) en ${path}`);
+        throw new ShippingError(504, "TIMEOUT", "Correo Argentino no respondió a tiempo");
+      }
+      // undici esconde la causa real en err.cause (ENOTFOUND, ECONNRESET, UND_ERR_CONNECT_TIMEOUT, etc.)
+      const cause = err.cause ? `${err.cause.code || ""} ${err.cause.message || ""}`.trim() : err.message;
+      console.error(`[correoargentino] error de red en ${path} (intento ${attempt}/2): ${cause}`);
+      if (attempt === 2) {
+        throw new ShippingError(502, "NETWORK_ERROR", "No se pudo conectar con Correo Argentino");
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    } finally {
+      clearTimeout(timer);
     }
-
-    throw new ShippingError(
-      502,
-      "NETWORK_ERROR",
-      "No se pudo conectar con Correo Argentino"
-    );
-  } finally {
-    clearTimeout(timer);
   }
 }
- 
+
 /* Devuelve un JWT válido, reutilizando el que ya está en memoria si todavía
    no venció. Si no hay token o está por vencer, pide uno nuevo con Basic Auth. */
+let tokenInFlight = null; // si ya hay un POST /token en curso, los demás pedidos esperan ese mismo
+
 async function getValidToken() {
-  const now = Date.now();
   // Margen de 30s para evitar usar un token que vence justo durante la llamada.
-  if (cachedToken && cachedToken.expiresAt - 30_000 > now) {
+  if (cachedToken && cachedToken.expiresAt - 30_000 > Date.now()) {
     return cachedToken.value;
   }
+  if (!tokenInFlight) {
+    tokenInFlight = requestNewToken().finally(() => {
+      tokenInFlight = null;
+    });
+  }
+  return tokenInFlight;
+}
+
+async function requestNewToken() {
+  const now = Date.now();
 
   const { username, password } = getCredentials();
   const basicAuth = Buffer.from(`${username}:${password}`).toString("base64");
@@ -103,7 +104,7 @@ async function getValidToken() {
         method: "POST",
         headers: { Authorization: `Basic ${basicAuth}`, "Content-Type": "application/json" },
       },
-      8000
+      30000
     );
   } catch (err) {
     if (err instanceof ShippingError) throw err;
@@ -252,4 +253,3 @@ async function getShippingRates({ postalCodeDestination, deliveredType, dimensio
 }
 
 module.exports = { ShippingError, getShippingRates };
-// Diagnóstico de conexión con Correo Argentino
