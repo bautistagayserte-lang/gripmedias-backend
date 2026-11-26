@@ -89,7 +89,7 @@ router.post("/orders/:id/preference", async (req, res) => {
     const preferenceBody = {
       items: mpItems,
       external_reference: order.order_code, // así se relaciona el pago de MP con el pedido de GRIP MEDIAS
-      statement_descriptor: "GRIP MEDIAS",
+      statement_descriptor: "GRIP SPORTS",
       metadata: { order_id: order.id, order_code: order.order_code },
       payer: {
         name: order.buyer_name,
