@@ -1,54 +1,33 @@
 const express = require("express");
 const crypto = require("crypto");
 const { pool } = require("../db/pool");
-const { ShippingError, getShippingRates } = require("../correoargentino");
 
 const router = express.Router();
 
 const TRANSFERENCIA_DISCOUNT_RATE = 0.1; // 10%, aplicado sobre productos + envío
 
-/* Vuelve a calcular el costo de envío en el backend — nunca se confía en un
-   shipping_cost que mande el frontend. "retiro" es gratis y no consulta
-   Correo Argentino. "domicilio" cotiza contra MiCorreo con el CP recibido.
-   "sucursal" todavía no está habilitado (no se inventan sucursales). */
-async function resolveShippingCost(shipping) {
+/* Tarifas FIJAS de envío (ARS). Ya no se cotiza contra Correo Argentino.
+   Es la única fuente de verdad del costo de envío: nunca se usa un
+   shipping_cost que mande el frontend. Para cambiar un precio, editar acá
+   (y CONFIG.shippingPrices en el index.html, que solo se usa para mostrarlo). */
+const SHIPPING_PRICES = { sucursal: 8500, domicilio: 11000, retiro: 0 };
+
+function resolveShippingCost(shipping) {
   if (shipping.method === "retiro") {
-    return { cost: 0, deliveredType: null, productType: null, productName: null };
+    return { cost: SHIPPING_PRICES.retiro, deliveredType: null, productType: null, productName: null };
+  }
+
+  // sucursal y domicilio: el código postal sigue siendo un dato obligatorio de destino.
+  if (!shipping.cp || !/^\d{3,5}$/.test(String(shipping.cp).trim())) {
+    throw new OrderError(400, "Falta un código postal de destino válido para el envío");
   }
 
   if (shipping.method === "sucursal") {
-    throw new OrderError(409, "El envío a sucursal todavía no está disponible. Elegí domicilio o retiro por cuenta propia.");
+    return { cost: SHIPPING_PRICES.sucursal, deliveredType: "S", productType: null, productName: "Sucursal" };
   }
 
   // shipping.method === "domicilio"
-  if (!shipping.cp) {
-    throw new OrderError(400, "Falta el código postal de destino para cotizar el envío");
-  }
-  if (!shipping.productType) {
-    throw new OrderError(400, "Falta indicar la opción de envío elegida (Clásico/Expreso)");
-  }
-
-  let rates;
-  try {
-    rates = await getShippingRates({ postalCodeDestination: shipping.cp, deliveredType: "D" });
-  } catch (err) {
-    if (err instanceof ShippingError) {
-      throw new OrderError(err.status, `No se pudo calcular el envío: ${err.message}`);
-    }
-    throw err;
-  }
-
-  const chosen = rates.find((r) => r.productType === shipping.productType);
-  if (!chosen) {
-    throw new OrderError(409, "La opción de envío elegida ya no está disponible para ese código postal. Volvé a cotizar.");
-  }
-
-  return {
-    cost: chosen.price,
-    deliveredType: "D",
-    productType: chosen.productType,
-    productName: chosen.productName,
-  };
+  return { cost: SHIPPING_PRICES.domicilio, deliveredType: "D", productType: null, productName: "Domicilio" };
 }
 
 class OrderError extends Error {
@@ -182,7 +161,7 @@ router.post("/orders", async (req, res) => {
 
     // Costo de envío SIEMPRE recalculado/validado en el backend — nunca se
     // confía en un shipping_cost enviado por el navegador.
-    const shippingResolved = await resolveShippingCost(shipping);
+    const shippingResolved = resolveShippingCost(shipping);
     const shippingCost = shippingResolved.cost;
 
     // Descuento por transferencia: 10% sobre (productos + envío).
