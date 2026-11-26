@@ -55,6 +55,9 @@ app.use(shippingRouter);
 // Para eliminarlo: borrar DIAG_TOKEN en Render, src/diagnostico.js y esta línea.
 app.use(require("./diagnostico"));
 
+// Panel de administración privado (solo se habilita si existen ADMIN_USER y ADMIN_PASSWORD_HASH).
+app.use(require("./routes/adminAuth"));
+
 // 404
 app.use((req, res) => {
   res.status(404).json({ error: "Ruta no encontrada" });
